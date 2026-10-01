@@ -6,23 +6,27 @@ pipeline {
     }
 
     stages {
-        stage('Verify Agent 1') {
-            agent { label 'agent1' }
+        stage('Verify Agents') {
+            parallel {
+                stage('Verify Agent 1') {
+                    agent { label 'agent1' }
 
-            steps {
-                sh 'echo "Running on:"'
-                sh 'hostname'
-                sh 'python3 --version'
-            }
-        }
+                    steps {
+                        sh 'echo "Running on Agent 1:"'
+                        sh 'hostname'
+                        sh 'python3 --version'
+                    }
+                }
 
-        stage('Verify Agent 2') {
-            agent { label 'agent2' }
+                stage('Verify Agent 2') {
+                    agent { label 'agent2' }
 
-            steps {
-                sh 'echo "Running on:"'
-                sh 'hostname'
-                sh 'python3 --version'
+                    steps {
+                        sh 'echo "Running on Agent 2:"'
+                        sh 'hostname'
+                        sh 'python3 --version'
+                    }
+                }
             }
         }
 
