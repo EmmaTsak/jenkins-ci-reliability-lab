@@ -51,6 +51,17 @@ pipeline {
                     }
                 }
 
+                stage('Validate Environment') {
+                    steps {
+                        sh '''
+                            if [ -z "$APP_ENV" ]; then
+                                echo "ERROR: APP_ENV is not configured"
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+
                 stage('Lint') {
                     steps {
                         sh '.venv/bin/python -m ruff check app tests'
