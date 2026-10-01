@@ -1,49 +1,72 @@
 pipeline {
-    agent { label 'python' }
+    agent none
 
     triggers {
         pollSCM('H/2 * * * *')
     }
-    
+
     stages {
-        stage('Verify Agent') {
+        stage('Verify Agent 1') {
+            agent { label 'agent1' }
+
             steps {
+                sh 'echo "Running on:"'
                 sh 'hostname'
-                sh 'whoami'
                 sh 'python3 --version'
-                sh 'git --version'
             }
         }
 
-        stage('Environment Setup') {
+        stage('Verify Agent 2') {
+            agent { label 'agent2' }
+
             steps {
-                sh 'python3 -m venv .venv'
-                sh '.venv/bin/python -m pip install -r requirements.txt'
+                sh 'echo "Running on:"'
+                sh 'hostname'
+                sh 'python3 --version'
             }
         }
 
-        stage('Lint') {
-            steps {
-                sh '.venv/bin/python -m ruff check app tests'
-            }
-        }
+        stage('CI Pipeline') {
+            agent { label 'agent1' }
 
-        stage('Test') {
-            steps {
-                sh '.venv/bin/python -m pytest -v'
-            }
-        }
+            stages {
+                stage('Checkout') {
+                    steps {
+                        checkout scm
+                    }
+                }
 
-        stage('Build') {
-            steps {
-                sh 'mkdir -p dist'
-                sh '.venv/bin/python -m zipfile -c dist/health-service.zip app'
-            }
-        }
+                stage('Environment Setup') {
+                    steps {
+                        sh 'python3 -m venv .venv'
+                        sh '.venv/bin/python -m pip install -r requirements.txt'
+                    }
+                }
 
-        stage('Archive Artifact') {
-            steps {
-                archiveArtifacts artifacts: 'dist/*.zip', fingerprint: true
+                stage('Lint') {
+                    steps {
+                        sh '.venv/bin/python -m ruff check app tests'
+                    }
+                }
+
+                stage('Test') {
+                    steps {
+                        sh '.venv/bin/python -m pytest -v'
+                    }
+                }
+
+                stage('Build') {
+                    steps {
+                        sh 'mkdir -p dist'
+                        sh '.venv/bin/python -m zipfile -c dist/health-service.zip app'
+                    }
+                }
+
+                stage('Archive') {
+                    steps {
+                        archiveArtifacts artifacts: 'dist/*.zip', fingerprint: true
+                    }
+                }
             }
         }
     }
