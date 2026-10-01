@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 
 jenkins_url = os.getenv(
-    "JENKINS_URL",
+    "JENKINS_INTERNAL_URL",
     "http://jenkins-controller:8080",
 ).rstrip("/")
 
