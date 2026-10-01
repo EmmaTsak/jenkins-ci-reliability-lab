@@ -20,3 +20,7 @@ Thumbs.db
 
 # Local Jenkins secrets/data
 jenkins_home/
+
+# Jenkins agent runtime files
+agent.jar
+secret-file
