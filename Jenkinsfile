@@ -1,10 +1,10 @@
 pipeline {
-    agent any
+    agent { label 'python' }
 
     stages {
-        stage('Verify Jenkins Environment') {
+        stage('Verify Agent') {
             steps {
-                sh 'pwd'
+                sh 'python3 --version'
                 sh 'hostname'
                 sh 'whoami'
             }
