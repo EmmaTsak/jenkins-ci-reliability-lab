@@ -25,3 +25,5 @@ jenkins_home/
 agent.jar
 secret-filedist/
 .pytest_cache/
+
+dist/
