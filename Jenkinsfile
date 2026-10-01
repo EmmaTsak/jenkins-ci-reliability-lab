@@ -58,6 +58,12 @@ pipeline {
                         sh 'python3 -m venv .venv'
                         sh '.venv/bin/python -m pip install -r requirements.txt'
                     }
+
+                    post {
+                        failure {
+                            echo 'FAILURE_CLASS=DEPENDENCY_OR_ENVIRONMENT'
+                        }
+                    }
                 }
 
                 stage('Validate Environment') {
@@ -79,17 +85,35 @@ pipeline {
                             sh '.venv/bin/python scripts/check_jenkins.py'
                         }
                     }
+
+                    post {
+                        failure {
+                            echo 'FAILURE_CLASS=INFRASTRUCTURE'
+                        }
+                    }
                 }
 
                 stage('Lint') {
                     steps {
                         sh '.venv/bin/python -m ruff check app tests'
                     }
+
+                    post {
+                        failure {
+                            echo 'FAILURE_CLASS=PRODUCT'
+                        }
+                    }
                 }
 
                 stage('Test') {
                     steps {
                         sh '.venv/bin/python -m pytest -v'
+                    }
+
+                    post {
+                        failure {
+                            echo 'FAILURE_CLASS=PRODUCT'
+                        }
                     }
                 }
 
