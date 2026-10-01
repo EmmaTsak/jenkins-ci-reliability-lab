@@ -2,13 +2,12 @@ pipeline {
     agent any
 
     stages {
-        stage('Verify Environment') {
+        stage('Verify Jenkins Environment') {
             steps {
-                sh 'python3 --version'
                 sh 'pwd'
                 sh 'hostname'
+                sh 'whoami'
             }
         }
     }
 }
-
