@@ -66,6 +66,13 @@ pipeline {
                     }
                 }
 
+                stage('Operational Checks') {
+                    steps {
+                        sh './scripts/check_disk.sh'
+                        sh '.venv/bin/python scripts/check_jenkins.py'
+                    }
+                }
+
                 stage('Lint') {
                     steps {
                         sh '.venv/bin/python -m ruff check app tests'
