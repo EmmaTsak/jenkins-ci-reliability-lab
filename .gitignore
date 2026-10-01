@@ -24,3 +24,4 @@ jenkins_home/
 # Jenkins agent runtime files
 agent.jar
 secret-filedist/
+.pytest_cache/
