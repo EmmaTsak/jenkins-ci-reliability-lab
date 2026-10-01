@@ -3,6 +3,11 @@ pipeline {
 
     options {
         disableConcurrentBuilds()
+        timeout(time: 10, unit: 'MINUTES')
+        buildDiscarder(logRotator(
+            numToKeepStr: '20',
+            artifactNumToKeepStr: '10'
+        ))
     }
 
     environment {
@@ -69,7 +74,10 @@ pipeline {
                 stage('Operational Checks') {
                     steps {
                         sh './scripts/check_disk.sh'
-                        sh '.venv/bin/python scripts/check_jenkins.py'
+
+                        retry(2) {
+                            sh '.venv/bin/python scripts/check_jenkins.py'
+                        }
                     }
                 }
 
@@ -96,6 +104,20 @@ pipeline {
                     steps {
                         archiveArtifacts artifacts: 'dist/*.zip', fingerprint: true
                     }
+                }
+            }
+
+            post {
+                success {
+                    echo 'CI pipeline completed successfully.'
+                }
+
+                failure {
+                    echo 'CI pipeline failed. Review the failed stage and console output.'
+                }
+
+                always {
+                    echo "Build result: ${currentBuild.currentResult}"
                 }
             }
         }
