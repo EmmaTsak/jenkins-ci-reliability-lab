@@ -85,6 +85,24 @@ pipeline {
                     }
                 }
 
+                stage('Credential Check') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: 'jenkins-api',
+                                usernameVariable: 'JENKINS_USER',
+                                passwordVariable: 'JENKINS_API_TOKEN'
+                            )
+                        ]) {
+                            sh '''
+                                test -n "$JENKINS_USER"
+                                test -n "$JENKINS_API_TOKEN"
+                                echo "Jenkins credentials loaded securely"
+                            '''
+                        }
+                    }
+                }
+
                 stage('Operational Checks') {
                     steps {
                         sh './scripts/check_disk.sh'
