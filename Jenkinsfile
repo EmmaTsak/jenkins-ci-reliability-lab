@@ -10,8 +10,16 @@ pipeline {
         ))
     }
 
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['ci', 'staging'],
+            description: 'Environment used by the pipeline'
+        )
+    }
+
     environment {
-        APP_ENV = 'ci'
+        APP_ENV = "${params.TARGET_ENV}"
     }
 
     triggers {
@@ -93,26 +101,30 @@ pipeline {
                     }
                 }
 
-                stage('Lint') {
-                    steps {
-                        sh '.venv/bin/python -m ruff check app tests'
-                    }
+                stage('Quality Checks') {
+                    parallel {
+                        stage('Lint') {
+                            steps {
+                                sh '.venv/bin/python -m ruff check app tests'
+                            }
 
-                    post {
-                        failure {
-                            echo 'FAILURE_CLASS=PRODUCT'
+                            post {
+                                failure {
+                                    echo 'FAILURE_CLASS=PRODUCT'
+                                }
+                            }
                         }
-                    }
-                }
 
-                stage('Test') {
-                    steps {
-                        sh '.venv/bin/python -m pytest -v'
-                    }
+                        stage('Test') {
+                            steps {
+                                sh '.venv/bin/python -m pytest -v'
+                            }
 
-                    post {
-                        failure {
-                            echo 'FAILURE_CLASS=PRODUCT'
+                            post {
+                                failure {
+                                    echo 'FAILURE_CLASS=PRODUCT'
+                                }
+                            }
                         }
                     }
                 }
