@@ -1,42 +1,32 @@
-# Architecture
+# Jenkins CI Reliability Lab — Architecture
 
-## Phase 3 Architecture
+## Overview
 
-Current environment:
+The lab runs on a Windows host with Jenkins infrastructure operated from WSL2 Ubuntu through Docker.
 
-Windows
-└── WSL2
-    └── Ubuntu
-        └── Docker
-            ├── Jenkins Controller
-            └── jenkins_home volume
+The environment contains:
 
-## Jenkins Controller
+- one Jenkins controller
+- persistent Jenkins controller storage
+- two inbound Jenkins agents
+- a dedicated Docker network
+- GitHub as the SCM source
+- a Python application used as the CI workload
+- operational Python and shell checks
+- a Jenkins REST API monitoring dashboard
 
-The Jenkins controller currently runs inside a Docker container.
+## Runtime Architecture
 
-Container name:
+```mermaid
+flowchart TD
+    WIN[Windows Host] --> WSL[WSL2 Ubuntu]
+    WSL --> DOCKER[Docker Runtime]
 
-jenkins-controller
+    DOCKER --> CTRL[Jenkins Controller]
+    DOCKER --> A1[linux-agent-1]
+    DOCKER --> A2[linux-agent-2]
 
-Ports:
+    VOL[(jenkins_home)] --> CTRL
 
-- 8080 — Jenkins web interface
-- 50000 — Jenkins inbound agent communication
-
-Persistent storage:
-
-- Docker volume: jenkins_home
-- Mounted at: /var/jenkins_home
-
-## Persistence Test
-
-The Jenkins container was:
-
-1. stopped and restarted
-2. deleted
-3. recreated using the same Docker volume
-
-The Jenkins configuration remained available after the container was recreated.
-
-This demonstrates that the Jenkins controller container is disposable while Jenkins state is stored persistently outside the container.
+    CTRL <-->|jenkins-lab network| A1
+    CTRL <-->|jenkins-lab network| A2
