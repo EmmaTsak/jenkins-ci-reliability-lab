@@ -1,6 +1,10 @@
 pipeline {
     agent { label 'python' }
 
+    triggers {
+        pollSCM('H/2 * * * *')
+    }
+    
     stages {
         stage('Verify Agent') {
             steps {
