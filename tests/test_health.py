@@ -10,4 +10,4 @@ def test_health_status():
 def test_version():
     result = get_health()
 
-    assert result["version"] == "0.1.0"
+    assert result["version"] == "0.2.0"
