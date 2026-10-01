@@ -5,6 +5,10 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+    environment {
+        APP_ENV = 'ci'
+    }
+
     triggers {
         pollSCM('H/2 * * * *')
     }
