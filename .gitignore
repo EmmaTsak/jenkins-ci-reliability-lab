@@ -1,11 +1,26 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build output
+dist/
+build/
+*.egg-info/
 
 # Environment / secrets
 .env
 .env.*
+*.secret
+*.key
+*.pem
+secret-file
+secret-file*
+credentials/
 
 # IDE
 .vscode/
@@ -18,12 +33,8 @@ Thumbs.db
 # Logs
 *.log
 
-# Local Jenkins secrets/data
+# Local Jenkins data
 jenkins_home/
 
 # Jenkins agent runtime files
 agent.jar
-secret-filedist/
-.pytest_cache/
-
-dist/

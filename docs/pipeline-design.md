@@ -1,77 +1,176 @@
-# docs/pipeline-design.md
-
-## Jenkins Pipeline Design
+# Jenkins Pipeline Design
 
 ## Purpose
 
-The pipeline validates the Python application while also exercising Jenkins infrastructure and reliability concepts.
+The main Jenkins pipeline validates a small Python application while also demonstrating distributed CI execution, reliability controls, operational checks, secure credential handling and clear failure classification.
+
+The pipeline is defined in:
+
+```text
+Jenkinsfile
+```
+
+A separate pipeline for executor and capacity experiments is defined in:
+
+```text
+Jenkinsfile.capacity
+```
 
 ## Trigger
 
-The pipeline uses SCM polling:
+The main pipeline uses Jenkins Poll SCM:
 
 ```text
 H/2 * * * *
 ```
 
-A change in GitHub triggers the Jenkins job after Jenkins detects the new revision.
+Jenkins periodically checks the GitHub repository for a new revision and starts the pipeline when a change is detected.
 
-## Top-Level Design
+The project uses Pipeline from SCM so the Jenkins pipeline definition remains version-controlled with the application source.
 
-The pipeline uses:
+## Top-Level Agent Strategy
+
+The main pipeline uses:
 
 ```groovy
 agent none
 ```
 
-This prevents the entire pipeline from occupying one executor unnecessarily.
+This prevents the entire pipeline from occupying a single Jenkins executor.
 
-Specific stages request the agents they need.
+Instead, stages request the execution environment they need.
+
+This makes the relationship between the Jenkins controller, agent labels and build execution explicit.
 
 ## Agent Verification
 
-The two agent checks run in parallel.
+The first stage verifies both Jenkins agents in parallel.
 
-Purpose:
+The pipeline targets:
 
-- prove distributed execution
-- confirm Python availability
-- confirm both agents are operational
+```text
+agent1
+agent2
+```
+
+Each branch checks:
+
+- agent availability
+- hostname
+- Python availability
+
+This demonstrates distributed Jenkins execution before the main CI workflow begins.
 
 ## Checkout
 
-The repository is retrieved from GitHub using Pipeline from SCM.
+The source repository is retrieved using:
+
+```groovy
+checkout scm
+```
+
+This keeps source retrieval aligned with the Jenkins Pipeline from SCM configuration.
 
 ## Environment Setup
 
-The pipeline creates a Python virtual environment and installs pinned dependencies.
+The main CI workflow creates a Python virtual environment:
 
-This improves reproducibility.
+```text
+.venv
+```
+
+Dependencies are then installed from:
+
+```text
+requirements.txt
+```
+
+The project pins the versions of pytest and Ruff so CI uses predictable tool versions.
+
+## Build Parameters
+
+The pipeline defines a `TARGET_ENV` parameter with values such as:
+
+```text
+ci
+staging
+```
+
+The selected value becomes:
+
+```text
+APP_ENV
+```
+
+inside the pipeline.
+
+This demonstrates basic parameterised pipeline behaviour without introducing unnecessary deployment complexity.
 
 ## Environment Validation
 
-Required environment variables are checked before quality or build stages begin.
+The pipeline checks that `APP_ENV` is configured before continuing.
 
-Failing early gives developers clearer feedback.
+Failing early helps make environment problems easier to identify.
 
-## Credential Check
+## Credential Handling
 
-Jenkins credentials are retrieved from the Jenkins Credential Store.
+The pipeline retrieves Jenkins credentials using:
 
-Sensitive values are injected temporarily and are not stored directly in the Jenkinsfile.
+```groovy
+withCredentials(...)
+```
+
+The configured credential is identified through Jenkins Credential Store rather than being placed directly in the Jenkinsfile.
+
+The pipeline receives temporary environment variables for:
+
+```text
+JENKINS_USER
+JENKINS_API_TOKEN
+```
+
+The stage verifies that both values are available without printing the actual credential values.
 
 ## Operational Checks
 
-Operational checks include:
+Operational checks are intentionally separated from application-quality checks.
 
-- disk threshold
+They include:
+
+- disk-capacity validation
 - Jenkins controller reachability
 
-Infrastructure checks are separated from product tests so failure signals remain meaningful.
+The disk check is implemented in:
 
-## Quality Checks
+```text
+scripts/check_disk.sh
+```
 
-Linting and tests run in parallel because they are independent.
+The Jenkins connectivity check is implemented in:
+
+```text
+scripts/check_jenkins.py
+```
+
+The connectivity check is wrapped in:
+
+```groovy
+retry(2)
+```
+
+because short infrastructure or networking failures may be transient.
+
+## Retry Strategy
+
+Retries are limited to infrastructure checks where a temporary failure may recover safely.
+
+Application tests are not automatically retried.
+
+A real product regression should remain visible rather than being repeatedly rerun until the pipeline becomes green.
+
+## Parallel Quality Checks
+
+Linting and tests run independently in parallel:
 
 ```text
 Quality Checks
@@ -79,229 +178,154 @@ Quality Checks
 └── Test
 ```
 
-Both are product-quality gates.
+Ruff validates Python code quality.
+
+pytest validates application behaviour.
+
+Running the two checks in parallel demonstrates Jenkins parallel stages while keeping the pipeline easy to understand.
 
 ## Build
 
-The application source is packaged into:
+After quality checks succeed, the application is packaged into:
 
 ```text
 dist/health-service.zip
 ```
 
-## Archive
+The project intentionally keeps the application itself small because the main focus of the repository is CI infrastructure and reliability rather than application complexity.
 
-Jenkins archives the generated ZIP with fingerprinting enabled.
+## Artifact Archiving
 
-The generated `dist/` directory is ignored by Git.
+The generated ZIP is archived by Jenkins using artifact fingerprinting.
 
-## Reliability Features
+Generated build output is excluded from Git source control.
 
-The pipeline includes:
-
-- timeout
-- disabled concurrent pipeline runs
-- build retention
-- artifact retention
-- infrastructure retry
-- explicit failure categories
-- post-build reporting
-
-## Retry Strategy
-
-Retries are limited to transient infrastructure operations.
-
-Application tests are not automatically retried to force a green result.
-
-## Parameters
-
-The pipeline supports selecting a target environment such as:
+This keeps a clear separation between:
 
 ```text
-ci
-staging
+source code
 ```
 
-This allows the same pipeline definition to support multiple execution contexts.
+and:
+
+```text
+build output
+```
+
+## Pipeline Timeout
+
+The pipeline has a ten-minute timeout.
+
+This prevents a stalled or blocked execution from consuming Jenkins resources indefinitely.
+
+## Concurrent Build Control
+
+The pipeline uses:
+
+```groovy
+disableConcurrentBuilds()
+```
+
+to prevent overlapping executions of the same main pipeline.
+
+Capacity and concurrency behaviour are tested separately through the dedicated capacity pipeline.
+
+## Build Retention
+
+The pipeline limits retained Jenkins history.
+
+It keeps:
+
+```text
+20 builds
+```
+
+and:
+
+```text
+10 artifact sets
+```
+
+This prevents build history and artifacts from growing indefinitely.
 
 ## Failure Classification
 
-Examples:
+The pipeline uses three failure categories:
 
 ```text
-FAILURE_CLASS=PRODUCT
-FAILURE_CLASS=INFRASTRUCTURE
-FAILURE_CLASS=DEPENDENCY_OR_ENVIRONMENT
+PRODUCT
+INFRASTRUCTURE
+DEPENDENCY_OR_ENVIRONMENT
 ```
 
-The goal is to improve CI signal quality by making failures easier to interpret.
+### PRODUCT
 
-## Capacity Design
+Used for problems such as:
 
-Agents normally use one executor each.
+- failing tests
+- lint failures
+- application regression
 
-This makes queue behavior easier to understand and prevents excessive resource contention in the lab.
+### INFRASTRUCTURE
 
-## Design Principle
+Used for problems such as:
 
-The pipeline is intentionally more than a sequence of shell commands.
+- Jenkins connectivity failure
+- operational-check failure
+- infrastructure availability problems
 
-It is designed to answer:
+### DEPENDENCY_OR_ENVIRONMENT
+
+Used for problems such as:
+
+- virtual-environment creation failure
+- dependency installation failure
+- environment setup failure
+
+The objective is to improve CI signal quality by making failures easier to interpret.
+
+## Post-Build Behaviour
+
+The pipeline reports whether the CI workflow:
+
+- completed successfully
+- failed
+- produced a final Jenkins build result
+
+This ensures the pipeline finishes with a clear operational signal.
+
+## Capacity Pipeline
+
+`Jenkinsfile.capacity` provides a separate controlled workload for studying Jenkins scheduling.
+
+It captures:
+
+- executing agent
+- CPU-core count
+- memory availability
+- disk usage
+
+It then runs simulated work long enough to occupy an executor.
+
+This was used to observe:
+
+- queued builds
+- one executor versus multiple executors
+- executor contention
+- capacity across multiple Jenkins agents
+
+## Design Principles
+
+The pipeline was designed around a few simple questions:
 
 ```text
 What failed?
 Where did it fail?
-Is it product or infrastructure?
-Can it recover safely?
-What evidence is retained?
+Is it product code or infrastructure?
+Should the failure be retried?
+What evidence should Jenkins retain?
 ```
 
----
+The goal is not to make the Jenkinsfile as complicated as possible.
 
-# docs/lessons-learned.md
-
-## Lessons Learned
-
-### Jenkins Controller vs Agent
-
-The controller schedules and coordinates work.
-
-Agents execute builds.
-
-Separating these roles improves isolation and allows build capacity to scale independently.
-
-### Executors Are Not Hardware
-
-An executor is a Jenkins scheduling slot.
-
-Adding executors does not create additional:
-
-- CPU
-- RAM
-- disk
-- network capacity
-
-Too many executors can make builds slower through contention.
-
-### Queues Are Useful Signals
-
-A growing build queue may indicate:
-
-- insufficient executor capacity
-- offline agents
-- overly restrictive labels
-- slow builds
-
-The correct response is not always to add executors.
-
-### Docker Networking Matters
-
-`localhost` is relative to the environment executing the command.
-
-Inside `linux-agent-1`:
-
-```text
-localhost
-```
-
-means Agent 1.
-
-To reach the controller over the Docker network, the pipeline can use:
-
-```text
-jenkins-controller
-```
-
-### Persistence Must Be Explicit
-
-Containers are disposable.
-
-Important Jenkins state must live outside the controller container.
-
-The `jenkins_home` volume allowed the controller to be deleted and recreated without losing configuration.
-
-### CI Signal Quality Matters
-
-A red build should answer whether the problem is:
-
-- product code
-- infrastructure
-- dependency/environment
-
-If every failure looks identical, CI becomes harder to trust and slower to troubleshoot.
-
-### Retries Have Limits
-
-Retries are useful for transient infrastructure failures.
-
-Retries should not hide deterministic application defects or flaky tests.
-
-### Flaky Tests Reduce Trust
-
-A test that changes result without a source-code change creates poor CI signal.
-
-The right fix is to remove the nondeterminism, not repeatedly rerun the test until it succeeds.
-
-### Monitoring Improves Operations
-
-The monitoring dashboard made Jenkins state visible through:
-
-- agent health
-- queue size
-- recent builds
-- failed builds
-- build duration
-- disk usage
-
-Operational visibility makes troubleshooting faster.
-
-### Build Artifacts Are Not Source Code
-
-Generated ZIP files belong in Jenkins artifacts rather than the Git repository.
-
-Source control should contain inputs needed to reproduce the build, not generated outputs.
-
-### Secrets Must Be Treated as Credentials
-
-Inbound agent secrets and API tokens should never be pasted into source control or documentation.
-
-When a secret is exposed, it should be rotated.
-
-### Least Privilege Reduces Risk
-
-Components and credentials should receive only the access required for their task.
-
-Build agents do not automatically need administrator-level access.
-
-### Reliability Is More Than Uptime
-
-Reliable CI also requires:
-
-- predictable environments
-- clear failures
-- bounded execution time
-- recoverability
-- monitoring
-- manageable resource usage
-- reproducible builds
-
-### Troubleshooting Is a Process
-
-The most useful troubleshooting sequence became:
-
-```text
-observe symptom
-→ inspect logs
-→ classify failure
-→ identify failure domain
-→ test hypothesis
-→ fix
-→ rerun
-→ confirm recovery
-```
-
-### Final Takeaway
-
-A useful CI platform is not simply one that runs tests.
-
-It must provide developers with fast, understandable, reproducible, and trustworthy feedback while remaining operable when infrastructure fails.
+The goal is to make CI behaviour understandable, reproducible and useful when something goes wrong.

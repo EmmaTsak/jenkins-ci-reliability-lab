@@ -1,307 +1,306 @@
-# docs/pipeline-design.md
+# Lessons Learned
 
-## Jenkins Pipeline Design
+## Jenkins Controller vs Agent
 
-## Purpose
+The Jenkins controller coordinates the CI system.
 
-The pipeline validates the Python application while also exercising Jenkins infrastructure and reliability concepts.
+It is responsible for tasks such as:
 
-## Trigger
+- job configuration
+- scheduling
+- queue management
+- credential management
+- agent coordination
+- build history
 
-The pipeline uses SCM polling:
+Agents provide the environments where pipeline work executes.
 
-```text
-H/2 * * * *
-```
+Keeping those responsibilities separate made Jenkins architecture easier to understand and demonstrated how build execution can be distributed across multiple nodes.
 
-A change in GitHub triggers the Jenkins job after Jenkins detects the new revision.
+## Executors Are Scheduling Slots
 
-## Top-Level Design
+One of the most important lessons from the capacity experiments was that a Jenkins executor is not additional hardware.
 
-The pipeline uses:
-
-```groovy
-agent none
-```
-
-This prevents the entire pipeline from occupying one executor unnecessarily.
-
-Specific stages request the agents they need.
-
-## Agent Verification
-
-The two agent checks run in parallel.
-
-Purpose:
-
-- prove distributed execution
-- confirm Python availability
-- confirm both agents are operational
-
-## Checkout
-
-The repository is retrieved from GitHub using Pipeline from SCM.
-
-## Environment Setup
-
-The pipeline creates a Python virtual environment and installs pinned dependencies.
-
-This improves reproducibility.
-
-## Environment Validation
-
-Required environment variables are checked before quality or build stages begin.
-
-Failing early gives developers clearer feedback.
-
-## Credential Check
-
-Jenkins credentials are retrieved from the Jenkins Credential Store.
-
-Sensitive values are injected temporarily and are not stored directly in the Jenkinsfile.
-
-## Operational Checks
-
-Operational checks include:
-
-- disk threshold
-- Jenkins controller reachability
-
-Infrastructure checks are separated from product tests so failure signals remain meaningful.
-
-## Quality Checks
-
-Linting and tests run in parallel because they are independent.
-
-```text
-Quality Checks
-├── Lint
-└── Test
-```
-
-Both are product-quality gates.
-
-## Build
-
-The application source is packaged into:
-
-```text
-dist/health-service.zip
-```
-
-## Archive
-
-Jenkins archives the generated ZIP with fingerprinting enabled.
-
-The generated `dist/` directory is ignored by Git.
-
-## Reliability Features
-
-The pipeline includes:
-
-- timeout
-- disabled concurrent pipeline runs
-- build retention
-- artifact retention
-- infrastructure retry
-- explicit failure categories
-- post-build reporting
-
-## Retry Strategy
-
-Retries are limited to transient infrastructure operations.
-
-Application tests are not automatically retried to force a green result.
-
-## Parameters
-
-The pipeline supports selecting a target environment such as:
-
-```text
-ci
-staging
-```
-
-This allows the same pipeline definition to support multiple execution contexts.
-
-## Failure Classification
-
-Examples:
-
-```text
-FAILURE_CLASS=PRODUCT
-FAILURE_CLASS=INFRASTRUCTURE
-FAILURE_CLASS=DEPENDENCY_OR_ENVIRONMENT
-```
-
-The goal is to improve CI signal quality by making failures easier to interpret.
-
-## Capacity Design
-
-Agents normally use one executor each.
-
-This makes queue behavior easier to understand and prevents excessive resource contention in the lab.
-
-## Design Principle
-
-The pipeline is intentionally more than a sequence of shell commands.
-
-It is designed to answer:
-
-```text
-What failed?
-Where did it fail?
-Is it product or infrastructure?
-Can it recover safely?
-What evidence is retained?
-```
-
----
-
-# docs/lessons-learned.md
-
-## Lessons Learned
-
-### Jenkins Controller vs Agent
-
-The controller schedules and coordinates work.
-
-Agents execute builds.
-
-Separating these roles improves isolation and allows build capacity to scale independently.
-
-### Executors Are Not Hardware
-
-An executor is a Jenkins scheduling slot.
-
-Adding executors does not create additional:
+Increasing executor count does not create more:
 
 - CPU
 - RAM
-- disk
+- disk capacity
 - network capacity
 
-Too many executors can make builds slower through contention.
+Executors only allow more Jenkins tasks to be scheduled concurrently on the same node.
 
-### Queues Are Useful Signals
+Too many executors can therefore increase resource contention rather than improve performance.
 
-A growing build queue may indicate:
+## Multiple Agents Can Add Capacity
 
-- insufficient executor capacity
-- offline agents
-- overly restrictive labels
-- slow builds
+Adding another Jenkins agent is different from simply adding executors to an existing node.
 
-The correct response is not always to add executors.
+A separate agent can provide additional execution capacity when that agent has its own available computing resources.
 
-### Docker Networking Matters
+The two-agent setup also demonstrated distributed Jenkins execution and label-based workload placement.
 
-`localhost` is relative to the environment executing the command.
+## Queues Are Operational Signals
 
-Inside `linux-agent-1`:
+A queued build does not automatically mean Jenkins is broken.
+
+A queue can indicate:
+
+- busy executors
+- insufficient capacity
+- an offline agent
+- restrictive labels
+- long-running workloads
+
+Queue behaviour should be investigated before changing executor counts.
+
+## Docker Networking Matters
+
+A major practical lesson was understanding what `localhost` means inside containers.
+
+Inside a Jenkins agent container:
 
 ```text
 localhost
 ```
 
-means Agent 1.
+refers to the agent itself.
 
-To reach the controller over the Docker network, the pipeline can use:
+It does not refer to the Jenkins controller.
+
+The controller is reachable across the Docker network using:
 
 ```text
 jenkins-controller
 ```
 
-### Persistence Must Be Explicit
+This made Docker DNS and container networking an important part of troubleshooting the CI environment.
+
+## Persistent Infrastructure Must Be Explicit
 
 Containers are disposable.
 
-Important Jenkins state must live outside the controller container.
+Jenkins state should therefore not depend on the lifetime of the controller container.
 
-The `jenkins_home` volume allowed the controller to be deleted and recreated without losing configuration.
+The project stores Jenkins state in:
 
-### CI Signal Quality Matters
+```text
+jenkins_home
+```
 
-A red build should answer whether the problem is:
+The controller container was recreated while reusing the same Docker volume, and Jenkins configuration remained available.
 
-- product code
-- infrastructure
-- dependency/environment
+This demonstrated the difference between disposable infrastructure and persistent state.
 
-If every failure looks identical, CI becomes harder to trust and slower to troubleshoot.
+## CI Signal Quality Matters
 
-### Retries Have Limits
+A red build is more useful when it explains what kind of problem occurred.
 
-Retries are useful for transient infrastructure failures.
+The project distinguishes:
 
-Retries should not hide deterministic application defects or flaky tests.
+```text
+PRODUCT
+INFRASTRUCTURE
+DEPENDENCY_OR_ENVIRONMENT
+```
 
-### Flaky Tests Reduce Trust
+This makes it easier to decide where troubleshooting should begin.
 
-A test that changes result without a source-code change creates poor CI signal.
+A failing application test should not trigger the same response as an offline Jenkins agent.
 
-The right fix is to remove the nondeterminism, not repeatedly rerun the test until it succeeds.
+## Retries Should Be Selective
 
-### Monitoring Improves Operations
+Retries can be useful for transient infrastructure problems.
 
-The monitoring dashboard made Jenkins state visible through:
+For example, a temporary Jenkins connectivity failure may succeed when retried shortly afterwards.
 
-- agent health
+However, retrying deterministic product tests until they eventually pass hides useful failure information.
+
+Retries should therefore be applied only where temporary recovery is reasonable.
+
+## Flaky Tests Reduce Trust
+
+A flaky test can produce different results for the same source revision:
+
+```text
+PASS
+FAIL
+PASS
+```
+
+That reduces confidence in CI.
+
+Repeatedly rerunning a flaky test until it passes produces a misleading signal.
+
+The correct response is to identify and remove the source of nondeterminism.
+
+## Build Artifacts Are Not Source Code
+
+Generated output should not normally live in the Git repository.
+
+The project generates:
+
+```text
+health-service.zip
+```
+
+during the Jenkins build and stores it as a Jenkins artifact.
+
+Git contains the inputs required to reproduce the artifact rather than the generated artifact itself.
+
+## Artifact Retention Matters
+
+CI systems can accumulate significant storage over time.
+
+Keeping every build and every artifact indefinitely is unnecessary for this lab.
+
+Build and artifact retention policies provide a simple example of controlling Jenkins storage growth.
+
+## Monitoring Improves Troubleshooting
+
+The monitoring dashboard made useful Jenkins state visible without requiring a full monitoring platform.
+
+It reports information such as:
+
+- Jenkins availability
+- online agents
+- offline agents
 - queue size
 - recent builds
 - failed builds
-- build duration
+- average build duration
 - disk usage
 
-Operational visibility makes troubleshooting faster.
+Having operational state available before making changes improves troubleshooting decisions.
 
-### Build Artifacts Are Not Source Code
+## Credentials Should Stay Outside Source Control
 
-Generated ZIP files belong in Jenkins artifacts rather than the Git repository.
+Jenkins credentials should not be stored directly in:
 
-Source control should contain inputs needed to reproduce the build, not generated outputs.
+- source files
+- Jenkinsfiles
+- documentation
+- screenshots
 
-### Secrets Must Be Treated as Credentials
+The project uses Jenkins Credential Store and temporary credential injection.
 
-Inbound agent secrets and API tokens should never be pasted into source control or documentation.
+API tokens and inbound agent secrets are treated as runtime credentials rather than repository configuration.
 
-When a secret is exposed, it should be rotated.
+## Exposed Secrets Must Be Rotated
 
-### Least Privilege Reduces Risk
+Deleting an exposed credential from a file is not enough.
 
-Components and credentials should receive only the access required for their task.
+If a secret is exposed, it should be considered compromised.
 
-Build agents do not automatically need administrator-level access.
+The correct response is to:
 
-### Reliability Is More Than Uptime
+1. rotate the credential
+2. invalidate the previous value
+3. check whether it entered Git history
+4. inspect relevant logs or screenshots
+5. verify the new credential works
 
-Reliable CI also requires:
+## Least Privilege Matters
 
-- predictable environments
-- clear failures
-- bounded execution time
-- recoverability
-- monitoring
-- manageable resource usage
-- reproducible builds
+Credentials and components should only receive the access required for their purpose.
 
-### Troubleshooting Is a Process
+A build agent does not automatically require administrator-level access to Jenkins.
 
-The most useful troubleshooting sequence became:
+Thinking about privilege boundaries is important even in a local learning environment.
+
+## Failure Classification Improves Incident Response
+
+Troubleshooting became easier when failures were classified before attempting recovery.
+
+For example:
+
+```text
+test failure
+→ PRODUCT
+```
+
+while:
+
+```text
+offline agent
+→ INFRASTRUCTURE
+```
+
+and:
+
+```text
+dependency installation failure
+→ DEPENDENCY_OR_ENVIRONMENT
+```
+
+This reduces the chance of changing infrastructure when the problem actually belongs to application code.
+
+## Operational Checks Belong in CI
+
+CI reliability depends on more than tests.
+
+Disk capacity and Jenkins connectivity can affect whether the pipeline is able to run successfully.
+
+Adding lightweight operational checks demonstrated how infrastructure state can be validated as part of CI.
+
+## Timeouts Prevent Unbounded Builds
+
+A pipeline should not be allowed to remain stuck indefinitely.
+
+The project uses a pipeline timeout to place a clear upper bound on execution time.
+
+This protects Jenkins execution capacity from blocked builds.
+
+## Troubleshooting Should Follow a Process
+
+The most useful troubleshooting pattern during the project became:
 
 ```text
 observe symptom
-→ inspect logs
-→ classify failure
-→ identify failure domain
-→ test hypothesis
-→ fix
-→ rerun
-→ confirm recovery
+        ↓
+inspect logs and state
+        ↓
+classify the failure
+        ↓
+identify the failure domain
+        ↓
+test a hypothesis
+        ↓
+apply the smallest appropriate fix
+        ↓
+rerun
+        ↓
+confirm recovery
 ```
 
-### Final Takeaway
+This approach was more reliable than changing multiple settings at once.
 
-A useful CI platform is not simply one that runs tests.
+## Reliability Is More Than Uptime
 
-It must provide developers with fast, understandable, reproducible, and trustworthy feedback while remaining operable when infrastructure fails.
+A useful CI system is not reliable simply because Jenkins is running.
+
+Reliable CI also requires:
+
+- understandable failure signals
+- reproducible environments
+- controlled execution time
+- manageable resource usage
+- persistent state
+- monitoring
+- secure credentials
+- useful artifacts
+- recoverability
+
+## Final Takeaway
+
+The biggest lesson from the project was that operating CI is different from simply writing a Jenkinsfile.
+
+A useful CI system needs to provide developers with feedback that is:
+
+- repeatable
+- understandable
+- actionable
+- secure
+- operationally manageable
+
+The reliability experiments made Jenkins behaviour much clearer than simply building a pipeline that always succeeds.
