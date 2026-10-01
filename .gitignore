@@ -23,4 +23,4 @@ jenkins_home/
 
 # Jenkins agent runtime files
 agent.jar
-secret-file
+secret-filedist/
