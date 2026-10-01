@@ -1,0 +1,24 @@
+pipeline {
+    agent { label 'python' }
+
+    stages {
+        stage('Resource Snapshot') {
+            steps {
+                sh 'echo "Agent: $(hostname)"'
+                sh 'echo "CPU cores: $(getconf _NPROCESSORS_ONLN)"'
+                sh "awk '/MemTotal|MemAvailable/ {print}' /proc/meminfo"
+                sh 'df -h /'
+            }
+        }
+
+        stage('Simulated Work') {
+            steps {
+                sh '''
+                    echo "Starting work at $(date)"
+                    sleep 30
+                    echo "Finished work at $(date)"
+                '''
+            }
+        }
+    }
+}
