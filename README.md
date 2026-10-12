@@ -1,33 +1,35 @@
 # Jenkins CI Reliability Lab
 
-A hands-on Jenkins CI environment built to explore how continuous integration behaves under real operational conditions: distributed execution, limited capacity, infrastructure failures, unreliable tests, monitoring, credential handling and recovery.
+A hands-on Jenkins CI environment built to explore how continuous integration behaves under real operational conditions: distributed builds, constrained executor capacity, infrastructure failures, flaky tests, monitoring, secure credential handling and recovery.
 
-The lab runs a Jenkins controller and two inbound Jenkins agents in Docker from a WSL2 Ubuntu environment. A declarative Jenkins pipeline validates a small Python application while reliability experiments deliberately exercise agent outages, queue pressure, environment failures, flaky tests and infrastructure problems.
+The lab runs a Jenkins controller and two inbound Jenkins agents in Docker within WSL2 Ubuntu. A declarative Jenkins pipeline validates a small Python application while reliability experiments intentionally exercise agent outages, queue pressure, environment failures and infrastructure problems.
 
 ## Portfolio Summary
 
-This project demonstrates practical junior-level DevOps and platform-engineering skills through a working Jenkins environment rather than configuration examples alone.
+This project demonstrates practical Jenkins, CI/CD and reliability-engineering foundations through a working local environment rather than configuration examples alone.
 
 It includes:
 
 - Dockerized Jenkins controller with persistent storage
 - two Docker-based Jenkins inbound agents
 - distributed and parallel pipeline execution
-- Pipeline from SCM with GitHub
-- Poll SCM automation
+- Jenkins Pipeline from SCM
+- GitHub source-control integration
+- Poll SCM automated builds
 - Python CI with pytest and Ruff
 - build parameters and environment validation
-- pipeline timeout and retention controls
-- archived and fingerprinted build artifacts
-- infrastructure retry handling
-- CI failure classification
+- Jenkins Credential Store integration
+- infrastructure health checks and retries
+- build and artifact retention
+- archived and fingerprinted artifacts
+- explicit CI failure classification
 - executor and queue-capacity experiments
 - Jenkins REST API monitoring
-- Jenkins Credential Store integration
-- API-token authentication
 - operational troubleshooting and incident documentation
 
-The focus is CI reliability and operability rather than production deployment.
+The focus of the project is CI reliability and operability rather than production deployment.
+
+---
 
 ## Why I Built This
 
@@ -35,16 +37,18 @@ A basic Jenkins pipeline can run tests successfully while still being difficult 
 
 I built this lab to understand questions such as:
 
-- What happens when an agent disappears?
-- Why does a build stay in the queue?
+- What happens when a Jenkins agent goes offline?
+- Why does a build remain in the queue?
 - What changes when a node has one executor versus several?
-- When is retrying a failed step appropriate?
-- How can CI distinguish a product defect from an infrastructure problem?
+- When is retrying a failed CI operation appropriate?
+- How can CI distinguish product failures from infrastructure failures?
 - How should credentials reach a pipeline without entering source control?
-- What Jenkins state should survive container recreation?
-- What operational signals are useful when diagnosing CI failures?
+- Which Jenkins state should survive container recreation?
+- What information is useful when diagnosing CI incidents?
 
-The project evolved from a simple Jenkins installation into a small reliability lab for answering those questions experimentally.
+The project evolved from a simple Jenkins installation into a small CI reliability lab for answering those questions experimentally.
+
+---
 
 ## Architecture
 
@@ -55,7 +59,7 @@ flowchart LR
     subgraph HOST["Local Host"]
         WIN[Windows]
         WSL[WSL2 Ubuntu]
-        DOCKER[Docker Runtime]
+        DOCKER[Docker]
 
         WIN --> WSL
         WSL --> DOCKER
@@ -68,8 +72,8 @@ flowchart LR
         VOL[(jenkins_home)]
 
         VOL --> CTRL
-        CTRL -->|agent1 label| A1
-        CTRL -->|agent2 label| A2
+        CTRL -->|agent1| A1
+        CTRL -->|agent2| A2
     end
 
     GH -->|Poll SCM| CTRL
@@ -78,7 +82,8 @@ flowchart LR
     DOCKER --> A1
     DOCKER --> A2
 
-    A1 --> CI["Checkout
+    A1 --> CI["CI Pipeline
+    Checkout
     Environment Setup
     Operational Checks
     Ruff + pytest
@@ -91,16 +96,45 @@ flowchart LR
     CTRL --> API[Jenkins REST API]
     API --> DASH[Python Monitoring Dashboard]
 ```
+![Two Jenkins agents online](docs/screenshots/agents-online.png)
 
-The Jenkins controller coordinates scheduling, job configuration, credentials and build history.
+The Jenkins controller coordinates scheduling, job configuration, credentials, build history and agent management.
 
-Normal build work is delegated to containerized agents.
+Normal build execution is delegated to containerized Jenkins agents.
 
 Jenkins state is stored in the persistent `jenkins_home` Docker volume so the controller container can be recreated without losing configuration.
 
-Both agents and the controller communicate across the `jenkins-lab` Docker network.
+The controller and agents communicate through the `jenkins-lab` Docker network.
 
-More detail: [`docs/architecture.md`](docs/architecture.md)
+More detail is available in [`docs/architecture.md`](docs/architecture.md).
+
+### Jenkins agents
+
+The environment contains:
+
+```text
+linux-agent-1
+linux-agent-2
+```
+
+The agents use labels including:
+
+```text
+agent1
+agent2
+python
+linux
+```
+
+This allows Jenkins stages to request specific execution environments.
+
+<!-- Add screenshot after capturing both agents online -->
+
+<!--
+![Two Jenkins agents online](docs/screenshots/agents-online.png)
+-->
+
+---
 
 ## Repository Structure
 
@@ -125,7 +159,8 @@ More detail: [`docs/architecture.md`](docs/architecture.md)
 │   ├── jenkins-admin.md
 │   ├── lessons-learned.md
 │   ├── pipeline-design.md
-│   └── troubleshooting.md
+│   ├── troubleshooting.md
+│   └── screenshots/
 ├── Jenkinsfile
 ├── Jenkinsfile.capacity
 ├── requirements.txt
@@ -133,9 +168,11 @@ More detail: [`docs/architecture.md`](docs/architecture.md)
 └── README.md
 ```
 
+---
+
 ## CI Workflow
 
-The main job uses Pipeline from SCM and polls the GitHub repository:
+The main Jenkins job uses Pipeline from SCM and polls the GitHub repository for changes:
 
 ```text
 H/2 * * * *
@@ -145,105 +182,174 @@ The current workflow is:
 
 ```text
 GitHub change
-    ↓
-Jenkins detects SCM revision
-    ↓
+      ↓
+Jenkins detects new SCM revision
+      ↓
 Verify both Jenkins agents in parallel
-    ↓
+      ↓
 Checkout
-    ↓
+      ↓
 Create Python virtual environment
-    ↓
+      ↓
 Install pinned dependencies
-    ↓
-Validate pipeline environment
-    ↓
+      ↓
+Validate environment
+      ↓
 Validate Jenkins credentials
-    ↓
+      ↓
 Operational checks
-    ├── disk capacity
-    └── Jenkins reachability with retry
-    ↓
+      ├── Disk capacity
+      └── Jenkins connectivity
+      ↓
 Quality checks in parallel
-    ├── Ruff
-    └── pytest
-    ↓
+      ├── Ruff
+      └── pytest
+      ↓
 Build ZIP artifact
-    ↓
+      ↓
 Archive + fingerprint artifact
 ```
 
-The pipeline uses `agent none` at the top level and selects agents explicitly for stages requiring execution capacity.
+The pipeline uses:
+
+```groovy
+agent none
+```
+![Successful Jenkins pipeline](docs/screenshots/pipeline-success.png)
+
+at the top level so individual stages explicitly request the execution environment they need.
 
 See [`Jenkinsfile`](Jenkinsfile) and [`docs/pipeline-design.md`](docs/pipeline-design.md).
 
+<!-- Add successful pipeline screenshot here -->
+
+<!--
+![Successful Jenkins pipeline](docs/screenshots/pipeline-success.png)
+-->
+
+---
+
+## Distributed Builds
+
+The pipeline verifies both Jenkins agents in parallel before the main CI workflow runs.
+
+This demonstrates:
+
+- multiple Jenkins nodes
+- label-based agent selection
+- parallel Jenkins stages
+- distributed build execution
+- executor scheduling across agents
+
+The controller coordinates the work while the agents provide execution capacity.
+
+---
+
+## Python CI Workload
+
+The application itself is intentionally small because the focus of the repository is CI infrastructure rather than application complexity.
+
+The Python service exposes a simple health result containing:
+
+- version
+- hostname
+- UTC timestamp
+- health status
+
+pytest validates application behaviour, while Ruff provides linting.
+
+The pinned CI dependencies are stored in:
+
+```text
+requirements.txt
+```
+
+---
+
 ## Reliability Engineering
 
-Reliability controls implemented in the lab include:
+The pipeline includes several controls intended to improve reliability and CI signal quality.
 
 ### Pipeline timeout
 
-The pipeline is bounded by a ten-minute timeout so a blocked build cannot consume capacity indefinitely.
+The main pipeline has a ten-minute timeout.
+
+This prevents a stalled or blocked build from consuming Jenkins resources indefinitely.
 
 ### Controlled concurrency
 
 Concurrent executions of the same main pipeline are disabled.
 
+Capacity behaviour is tested separately using the dedicated capacity pipeline.
+
 ### Build retention
 
-Jenkins retains a bounded number of builds and artifacts rather than allowing storage usage to grow without limit.
+Jenkins retains a limited number of builds and artifact sets.
 
-### Infrastructure retry
+The pipeline keeps:
 
-The Jenkins connectivity check is retried because connectivity can fail transiently.
+```text
+20 builds
+10 artifact sets
+```
 
-Product tests are intentionally not wrapped in retries.
+This prevents Jenkins storage from growing indefinitely.
 
-A deterministic application failure should stay red until the underlying problem is fixed.
+### Infrastructure retries
 
-### Multiple agents
+The Jenkins connectivity check is retried because short infrastructure or networking failures can be transient.
 
-Two inbound Jenkins agents demonstrate distributed execution and provide separate execution capacity.
+Product tests are intentionally not automatically retried.
 
-### Persistent controller storage
+A deterministic application failure should remain red until the underlying issue is corrected.
 
-Jenkins state lives in `jenkins_home`, outside the disposable controller container.
+### Persistent controller state
+
+Jenkins state is stored in:
+
+```text
+jenkins_home
+```
+
+rather than relying on the lifetime of the controller container.
+
+This allows the controller container to be replaced while preserving Jenkins configuration.
 
 ### Dependency pinning
 
-Python CI dependencies are pinned in `requirements.txt` to improve reproducibility.
+Python CI tools are pinned to explicit versions to improve reproducibility.
 
-### Failure classification
+### Multiple agents
 
-Failures are grouped into:
+Two Jenkins agents provide distributed execution and allow capacity behaviour to be explored beyond a single node.
+
+---
+
+## Failure Classification
+
+CI failures are grouped into three categories:
 
 ```text
 PRODUCT
 INFRASTRUCTURE
 DEPENDENCY_OR_ENVIRONMENT
 ```
-
-This makes the CI signal more useful than a generic red build.
-
-## Failure Handling
-
-The lab distinguishes the domain of a failure before attempting recovery.
+![Jenkins failure experiment](docs/screenshots/failure-experiment.png)
 
 ### PRODUCT
 
 Examples:
 
-- failing pytest test
+- pytest failure
 - Ruff violation
 - application regression
-- deterministic source-code defect
 
 ### INFRASTRUCTURE
 
 Examples:
 
-- Jenkins controller unreachable
-- offline Jenkins agent
+- Jenkins controller unavailable
+- Jenkins agent offline
 - Docker networking failure
 - disk-capacity failure
 
@@ -252,83 +358,137 @@ Examples:
 Examples:
 
 - virtual-environment setup failure
-- dependency installation failure
-- missing or invalid execution environment
+- package installation failure
+- invalid execution environment
 
-The objective is not merely to detect failure but to make the failure actionable.
+The purpose is to make a red pipeline easier to interpret and troubleshoot.
+
+---
 
 ## Failure Experiments
 
-Failures were intentionally introduced while building the lab.
+Several failures were intentionally introduced while developing the lab.
 
-| Experiment | What it demonstrated |
+| Experiment | Lesson |
 | --- | --- |
-| Application test regression | Product failures should remain red rather than being hidden by retries. |
+| Application test regression | Product failures should stay visible rather than being hidden by retries. |
 | Offline Jenkins agent | Agent availability directly affects scheduling and distributed execution. |
 | Missing environment variable | CI should validate required environment state early. |
-| Jenkinsfile syntax failure | Pipeline-definition failures occur before normal application execution. |
-| Python syntax failure | Automation code itself requires validation and clear diagnostics. |
-| Shell comparison error | Small shell mistakes can become infrastructure failures in CI. |
-| Jenkins connectivity failure | Container networking and service addressing affect operational checks. |
+| Jenkinsfile syntax failure | Pipeline-definition problems can fail before normal application execution begins. |
+| Python syntax failure | Automation scripts themselves require validation and clear diagnostics. |
+| Shell comparison error | Small shell errors can become CI operational failures. |
+| Jenkins connectivity failure | Container networking and service addressing directly affect infrastructure checks. |
 | Flaky test | Nondeterministic tests reduce confidence in CI results. |
-| Constrained executor capacity | Busy executors create queues even when Jenkins itself is healthy. |
+| Constrained executor capacity | Busy executors create queues even while Jenkins is otherwise healthy. |
 
-Details are documented in [`docs/troubleshooting.md`](docs/troubleshooting.md).
+More detailed troubleshooting examples are documented in [`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+<!-- Add deliberate failure screenshot here -->
+
+<!--
+![Jenkins failure experiment](docs/screenshots/failure-experiment.png)
+-->
+
+---
 
 ## CI Signal Quality
 
-A reliable CI system should help answer:
+A useful CI failure should help answer:
 
 ```text
 What failed?
 Where did it fail?
 Is it application code or infrastructure?
-Is retry appropriate?
+Should the operation be retried?
 What evidence was retained?
 ```
 
-The project uses failure classification, stage boundaries, logs and artifacts to make failed runs easier to interpret.
+The project uses stage boundaries, failure classification, console output and archived artifacts to make pipeline results easier to interpret.
 
-Flaky tests were deliberately explored because repeatedly rerunning an unreliable product test can create a misleading green pipeline.
+Flaky-test behaviour was also explored because repeatedly rerunning unreliable tests until they pass produces a misleading CI signal.
+
+---
 
 ## Capacity and Scaling
 
-The lab explored Jenkins capacity using:
+![Executor and queue capacity experiment](docs/screenshots/executor-queue.png)
+
+A separate pipeline is provided in:
+
+```text
+Jenkinsfile.capacity
+```
+
+It records:
+
+- executing agent
+- CPU-core count
+- available memory
+- disk usage
+
+It then performs simulated work long enough to occupy an executor.
+
+The experiments explored:
 
 - one executor
 - multiple executors
-- multiple agents
+- multiple Jenkins agents
 - queued builds
-- simulated long-running work
-- CPU, memory and disk snapshots
+- parallel workloads
+- resource contention
 
-The separate [`Jenkinsfile.capacity`](Jenkinsfile.capacity) provides a controlled workload for capacity experiments.
+One of the most important conclusions was:
 
-An important result from these experiments is:
+> A Jenkins executor is a scheduling slot, not additional hardware.
 
-> An executor is a Jenkins scheduling slot, not additional hardware.
+Increasing executor count allows more tasks to be scheduled concurrently but does not create additional:
 
-Adding executors can allow more tasks to run concurrently, but those tasks still share the same CPU, RAM, disk and network resources.
+- CPU
+- RAM
+- disk
+- network capacity
 
 Too many executors can therefore increase resource contention.
 
-Adding another agent can provide additional execution capacity when that agent has its own available resources.
+Adding another agent can provide additional execution capacity when that agent has separate available resources.
+
+<!-- Add queue/executor screenshot here -->
+
+<!--
+![Executor and queue capacity experiment](docs/screenshots/executor-queue.png)
+-->
+
+---
 
 ## Build Artifacts
 
-The main pipeline packages the Python application as:
+![Archived Jenkins build artifact](docs/screenshots/archived-artifact.png)
+
+After CI checks succeed, the application is packaged as:
 
 ```text
 dist/health-service.zip
 ```
 
-Jenkins archives the artifact with fingerprinting enabled.
+Jenkins archives the ZIP using artifact fingerprinting.
 
-Generated artifacts are ignored by Git because source control should contain the inputs required to reproduce a build, not the resulting build output.
+Generated build output is excluded from Git because source control should contain the inputs required to reproduce a build rather than generated artifacts.
+
+<!-- Add archived artifact screenshot here -->
+
+<!--
+![Archived Jenkins build artifact](docs/screenshots/archived-artifact.png)
+-->
+
+---
 
 ## Monitoring
 
-`monitoring/dashboard.py` uses the Jenkins REST API to report:
+![Jenkins monitoring dashboard](docs/screenshots/monitoring-dashboard.png)
+
+`monitoring/dashboard.py` uses the Jenkins REST API to provide lightweight operational visibility.
+
+It reports:
 
 - Jenkins availability
 - online agents
@@ -337,145 +497,194 @@ Generated artifacts are ignored by Git because source control should contain the
 - recent builds
 - failed builds
 - average build duration
-- disk usage
+- local disk usage
 
-This is intentionally a lightweight operational dashboard rather than a full monitoring platform.
+The dashboard supports Jenkins API-token authentication through environment variables.
 
-The dashboard supports API-token authentication through environment variables.
+It is intentionally a small operational tool rather than a replacement for a full monitoring platform.
 
-Run it with the appropriate local Jenkins environment configured:
+Example:
 
-```bash
-python3 monitoring/dashboard.py
+```text
+Jenkins CI Reliability Dashboard
+
+Jenkins status: ONLINE
+Online agents:  2
+Offline agents: 0
+Queue size:     ...
+Recent builds:  ...
+Failed builds:  ...
+Average duration: ...
+Disk usage:     ...
 ```
+
+<!-- Add monitoring screenshot here -->
+
+<!--
+![Jenkins monitoring dashboard](docs/screenshots/monitoring-dashboard.png)
+-->
+
+---
 
 ## Operational Automation
 
 ### Jenkins health check
 
-`scripts/check_jenkins.py` verifies that the Jenkins controller is reachable and exits non-zero if connectivity fails.
+`scripts/check_jenkins.py` performs an HTTP reachability check against the Jenkins controller.
 
-The main pipeline retries this check to tolerate short transient infrastructure failures.
+It uses a request timeout and exits non-zero if Jenkins cannot be reached.
 
-### Disk-capacity check
+The pipeline retries this check because connectivity failures may sometimes be transient.
 
-`scripts/check_disk.sh` checks disk utilization against a configurable threshold:
+### Disk capacity check
+
+`scripts/check_disk.sh` measures disk utilisation against a configurable threshold.
+
+The default threshold can be overridden using:
 
 ```text
 DISK_THRESHOLD
 ```
 
-The script exits non-zero when usage exceeds the threshold, allowing Jenkins to fail the operational-check stage.
+If usage reaches or exceeds the threshold, the script exits non-zero and Jenkins treats the operational check as failed.
+
+---
 
 ## Security
 
-Credentials are not stored in source control.
+Credentials are not stored directly in the repository.
 
-The lab demonstrates:
+Security practices demonstrated in the lab include:
 
 - Jenkins Credential Store
-- scoped credential injection with `withCredentials`
 - Jenkins API-token authentication
-- environment-variable based credential consumption
-- secret masking by Jenkins credential handling
-- agent-secret rotation procedures
+- scoped credential injection using `withCredentials`
+- environment-variable based credential use
+- Jenkins secret masking
+- inbound-agent secret rotation
 - separation of credentials from Git
 - least-privilege thinking
 
-Inbound-agent connection secrets and API tokens must never be committed to the repository.
+The main pipeline receives temporary variables such as:
 
-If a credential is exposed, the response is to:
+```text
+JENKINS_USER
+JENKINS_API_TOKEN
+```
+
+without storing the real values in the Jenkinsfile.
+
+Agent connection secrets and API tokens should never be committed to source control or exposed in screenshots.
+
+If a credential is exposed:
 
 1. treat it as compromised
 2. rotate it
-3. invalidate the old value
-4. inspect Git history and logs
-5. confirm the replacement works
-6. avoid reusing the exposed credential
+3. invalidate the previous value
+4. inspect Git history
+5. inspect logs and screenshots
+6. verify the replacement credential
+7. do not reuse the compromised credential
 
-The project does not claim a complete enterprise RBAC or secrets-management platform; it demonstrates safe Jenkins credential-handling practices within the scope of this lab.
+This project does not claim to implement an enterprise secrets-management platform. It demonstrates safe Jenkins credential-handling practices within the scope of the lab.
+
+---
 
 ## Jenkins Administration
 
-Operational tasks and recovery commands are documented in:
+Operational procedures are documented in:
 
 [`docs/jenkins-admin.md`](docs/jenkins-admin.md)
 
 Topics include:
 
 - controller lifecycle
-- agent lifecycle
-- executor behavior
-- queue investigation
 - persistent storage
+- agent lifecycle
+- executor behaviour
+- build queues
 - credentials
 - agent-secret rotation
 - Docker networking
-- health checks
+- operational health checks
+
+---
 
 ## Incident Response
 
-The incident runbook follows a basic operational flow:
+The project includes a structured Jenkins incident runbook.
+
+The basic process is:
 
 ```text
 Confirm incident
-    ↓
+      ↓
 Classify failure
-    ↓
+      ↓
 Check controller
-    ↓
+      ↓
 Check agents
-    ↓
+      ↓
 Inspect queue
-    ↓
+      ↓
 Inspect resources
-    ↓
+      ↓
 Inspect networking
-    ↓
+      ↓
 Review recent changes
-    ↓
+      ↓
 Recover safely
-    ↓
+      ↓
 Validate recovery
-    ↓
+      ↓
 Record lessons
 ```
 
 See [`docs/incident-runbook.md`](docs/incident-runbook.md).
 
+---
+
 ## What I Learned
 
 The main technical lessons from this project were:
 
-- Jenkins controllers coordinate work; agents execute it.
-- Agent labels control where workloads can run.
-- Executors represent scheduling capacity, not CPU or RAM.
-- Queue growth is an operational signal, not automatically a reason to add executors.
-- Multiple agents can increase available execution capacity.
+- Jenkins controllers coordinate work while agents execute it.
+- Agent labels determine where workloads can run.
+- Executors represent scheduling capacity rather than physical resources.
+- Queue growth is an operational signal and does not automatically mean Jenkins is unhealthy.
+- Adding executors is different from adding agents.
 - Docker networking changes what `localhost` means.
-- Persistent volumes separate Jenkins state from disposable containers.
-- Infrastructure failures should be distinguished from application failures.
-- Retries belong around transient operations, not deterministic test failures.
-- Flaky tests reduce trust in CI.
-- Build artifacts belong in CI artifact storage rather than source control.
-- Monitoring improves troubleshooting because it provides system state before changes are attempted.
-- Credentials should be injected only when needed and should never be committed.
-- Incident response is more effective when failures are classified before recovery actions begin.
+- Persistent volumes separate important Jenkins state from disposable containers.
+- Application failures and infrastructure failures require different troubleshooting paths.
+- Retries should target transient infrastructure failures rather than deterministic product failures.
+- Flaky tests reduce confidence in CI.
+- Generated build artifacts belong in CI artifact storage rather than Git.
+- Build retention prevents unlimited storage growth.
+- Monitoring improves troubleshooting by exposing system state before changes are made.
+- Credentials should be injected only when required and should never be committed.
+- Failure classification improves incident response.
+- Reliable CI requires operational engineering in addition to a working Jenkinsfile.
 
-More detail: [`docs/lessons-learned.md`](docs/lessons-learned.md)
+More detail is available in [`docs/lessons-learned.md`](docs/lessons-learned.md).
+
+---
 
 ## Technology Stack
 
 - Jenkins
-- Declarative Pipeline / Groovy
+- Declarative Jenkins Pipeline / Groovy
 - Docker
 - WSL2 Ubuntu
-- Git / GitHub
+- Linux
+- Git
+- GitHub
 - Python
 - pytest
 - Ruff
 - POSIX shell
 - Jenkins REST API
+
+---
 
 ## Documentation
 
@@ -484,13 +693,15 @@ More detail: [`docs/lessons-learned.md`](docs/lessons-learned.md)
 | [`architecture.md`](docs/architecture.md) | Runtime and CI architecture |
 | [`jenkins-admin.md`](docs/jenkins-admin.md) | Jenkins administration and node operations |
 | [`pipeline-design.md`](docs/pipeline-design.md) | Pipeline design decisions |
-| [`troubleshooting.md`](docs/troubleshooting.md) | Failure symptoms and diagnosis |
-| [`incident-runbook.md`](docs/incident-runbook.md) | Structured incident-response procedure |
-| [`lessons-learned.md`](docs/lessons-learned.md) | Technical conclusions from the experiments |
+| [`troubleshooting.md`](docs/troubleshooting.md) | Symptoms, causes and troubleshooting steps |
+| [`incident-runbook.md`](docs/incident-runbook.md) | Structured incident-response process |
+| [`lessons-learned.md`](docs/lessons-learned.md) | Technical conclusions from the reliability experiments |
+
+---
 
 ## Project Scope
 
-This is a local CI reliability lab.
+This repository is a local CI reliability lab.
 
 It does not claim:
 
@@ -501,25 +712,34 @@ It does not claim:
 - enterprise-scale Jenkins
 - production SRE experience
 
-The goal is to demonstrate practical Jenkins, CI, Docker, Linux, troubleshooting and reliability-engineering foundations through reproducible experiments.
+The purpose is to demonstrate practical Jenkins, Docker, Linux, CI, troubleshooting, monitoring and reliability-engineering foundations through hands-on experiments.
 
-## Status
+---
+
+## Project Status
 
 The implemented lab currently covers:
 
-- persistent Jenkins controller
+- Dockerized Jenkins controller
+- persistent Jenkins storage
 - two inbound Docker agents
-- distributed builds
-- automated SCM polling
-- parallel CI stages
-- Python linting and tests
-- build artifacts
-- parameters
-- credentials
-- retries and timeouts
+- distributed Jenkins execution
+- automatic SCM polling
+- declarative Jenkins pipeline
+- Python virtual environments
+- Ruff linting
+- pytest testing
+- parallel stages
+- pipeline parameters
+- Jenkins credentials
+- infrastructure retries
+- pipeline timeout
 - build retention
+- artifact retention
+- archived build artifacts
 - failure classification
 - capacity experiments
-- operational monitoring
-- troubleshooting
+- queue and executor testing
+- Jenkins REST API monitoring
+- troubleshooting documentation
 - incident-response documentation
